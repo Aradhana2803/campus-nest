@@ -1,13 +1,30 @@
 # Python
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
+.venv/
+venv/
+.pytest_cache/
+
+# Environment / secrets
 .env
-uploads/
-campusnest.db
+backend/.env
+frontend/.env
+
+# Database
+*.db
 *.db-journal
+backend/*.db
+backend/tests/_test.db
+
+# Uploads
+uploads/
 
 # Node
 node_modules/
 dist/
 .vite/
+
+# IDE / OS
+.idea/
+.DS_Store
