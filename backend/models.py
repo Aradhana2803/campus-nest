@@ -1,325 +1,299 @@
+"""
+SQLAlchemy ORM models. Designed to run unchanged on SQLite (default) and
+PostgreSQL — only portable column types are used (JSON instead of JSONB,
+Integer PKs instead of UUIDs).
+"""
+from datetime import datetime, timezone
+
 from sqlalchemy import (
-    Column, Integer, String, Boolean, Float,
-    ForeignKey, DateTime, JSON, Text, Enum as SAEnum
+    JSON,
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
-from database import Base
-import enum
+
+from .database import Base
 
 
-# ─────────────── Enums ───────────────
-
-class UserRole(str, enum.Enum):
-    student = "student"
-    owner = "owner"
-    moderator = "moderator"
-    guest = "guest"
+def utcnow() -> datetime:
+    """Naive UTC timestamp (portable across SQLite/Postgres)."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-class PropertyType(str, enum.Enum):
-    PG = "PG"
-    Flat = "Flat"
-
-
-class GenderType(str, enum.Enum):
-    Boys = "Boys"
-    Girls = "Girls"
-    CoEd = "Co-ed"
-    Any = "Any"
-
-
-class RentStatus(str, enum.Enum):
-    Paid = "PAID"
-    Unpaid = "UNPAID"
-    Partial = "PARTIAL"
-
-
-class ApprovalStatus(str, enum.Enum):
-    Pending = "PENDING"
-    Approved = "APPROVED"
-    Rejected = "REJECTED"
-
-
-# ─────────────── Models ───────────────
-
+# ------------------------------------------------------------------ users ---
 class User(Base):
     __tablename__ = "users"
 
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(100), nullable=True)
-    phone = Column(String(20), unique=True, index=True, nullable=False)
-    reg_no = Column(String(20), unique=True, index=True, nullable=True)      # Students only
-    role = Column(String(20), default="student", nullable=False)
-    gender = Column(String(10), nullable=True)
-    parent_phone = Column(String(20), nullable=True)
-    face_id_url = Column(String(500), nullable=True)
-    photo_url = Column(String(500), nullable=True)
-    is_active = Column(Boolean, default=True)
+    id = Column(Integer, primary_key=True)
+    role = Column(String(20), nullable=False, default="student")  # student | owner | moderator
+    name = Column(String(120))
+    email = Column(String(200))
+    phone = Column(String(20), index=True)     # owners / moderators log in with phone
+    reg_no = Column(String(30), index=True)    # students log in with registration no
+    college = Column(String(200), default="VIT Bhopal")
+    avatar_url = Column(String(500))
+    # owner verification (moderator approves owners before they can list)
     is_verified = Column(Boolean, default=False)
-    profile_complete = Column(Boolean, default=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    is_active = Column(Boolean, default=True)
+    # lifestyle profile used by roommate matching
+    veg = Column(String(20))           # veg | non-veg | eggetarian
+    smoker = Column(String(20))        # yes | no | occasionally
+    sleep = Column(String(20))         # early-bird | night-owl | flexible
+    cleanliness = Column(String(20))   # tidy | average | relaxed
+    study = Column(String(20))         # quiet | music | group
+    budget = Column(Integer)           # monthly rent budget (INR)
+    about_me = Column(Text)
+    looking_for_roommate = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=utcnow)
 
-    # Relationships
-    profile = relationship("Profile", back_populates="user", uselist=False, cascade="all, delete-orphan")
-    owned_properties = relationship("Property", back_populates="owner", foreign_keys="Property.owner_id")
-    tenancies = relationship("Tenancy", back_populates="student")
-    reviews = relationship("Review", back_populates="author")
-    community_posts = relationship("CommunityPost", back_populates="author")
-    notifications = relationship("Notification", back_populates="user", cascade="all, delete-orphan")
-    otp_records = relationship("OTPRecord", back_populates="user", cascade="all, delete-orphan")
-
-
-class OTPRecord(Base):
-    """Stores OTP codes for phone verification."""
-    __tablename__ = "otp_records"
-
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
-    phone = Column(String(20), nullable=False, index=True)
-    otp_code = Column(String(10), nullable=False)
-    is_used = Column(Boolean, default=False)
-    expires_at = Column(DateTime(timezone=True), nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-    user = relationship("User", back_populates="otp_records")
+    properties = relationship("Property", back_populates="owner")
+    reviews = relationship("Review", back_populates="user")
 
 
-class Profile(Base):
-    """Student lifestyle preferences for roommate matching."""
-    __tablename__ = "profiles"
+class OTPCode(Base):
+    __tablename__ = "otp_codes"
 
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True)
-    veg = Column(String(20), default="Veg")               # Veg / Non-veg / Vegan
-    smoker = Column(String(20), default="Non-smoker")     # Smoker / Non-smoker / Occasional
-    sleep = Column(String(20), default="Flexible")        # Early Bird / Night Owl / Flexible
-    cleanliness = Column(String(30), default="Neat Freak")
-    study = Column(String(30), default="Library Dweller")
-    about_me = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-
-    user = relationship("User", back_populates="profile")
+    id = Column(Integer, primary_key=True)
+    identifier = Column(String(100), index=True, nullable=False)  # phone or reg_no
+    code = Column(String(10), nullable=False)
+    purpose = Column(String(20), default="login")
+    expires_at = Column(DateTime, nullable=False)
+    used = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=utcnow)
 
 
+# ------------------------------------------------------------- properties ---
 class Property(Base):
     __tablename__ = "properties"
 
-    id = Column(Integer, primary_key=True, index=True)
-    owner_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    id = Column(Integer, primary_key=True)
+    owner_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     name = Column(String(200), nullable=False)
-    description = Column(Text, nullable=True)
-    property_type = Column(String(10), default="PG")         # PG / Flat
-    gender_type = Column(String(10), default="Co-ed")        # Boys / Girls / Co-ed / Any
-    area = Column(String(200), nullable=True)
-    full_address = Column(Text, nullable=True)
-    latitude = Column(Float, nullable=True)
-    longitude = Column(Float, nullable=True)
+    type = Column(String(40), default="PG")  # PG | Hostel | 1BHK | 2BHK | Shared Room | Studio
+    gender = Column(String(10), default="any")  # boys | girls | any
+    description = Column(Text)
+    address = Column(String(300))
+    area = Column(String(100), index=True)   # locality name, used by rent-trends
+    city = Column(String(100), default="Bhopal")
+    lat = Column(Float)
+    lng = Column(Float)
+    rent = Column(Integer, nullable=False)          # per month, INR
+    deposit = Column(Integer, default=0)
+    other_price = Column(Integer, default=0)        # maintenance / electricity etc.
+    distance_km = Column(Float, default=0)          # distance from campus
+    safety_score = Column(Float, default=4.0)       # 0-5
+    amenities = Column(JSON, default=list)          # ["wifi","ac","mess",...]
+    images = Column(JSON, default=list)
+    total_slots = Column(Integer, default=1)
+    status = Column(String(20), default="pending", index=True)  # pending | approved | rejected
+    rejection_reason = Column(Text)
+    is_featured = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
-    # Pricing
-    rent = Column(Integer, nullable=False)
-    other_price = Column(Integer, nullable=True)             # Price on other platforms
-    security_deposit = Column(Integer, nullable=True)
-
-    # Metadata
-    safety_score = Column(Float, default=3.0)
-    distance = Column(String(20), nullable=True)            # e.g. "1.2km"
-    approval_status = Column(String(20), default="PENDING")
-    is_active = Column(Boolean, default=True)
-    verified_badge = Column(Boolean, default=False)
-
-    # Amenities stored as JSON list
-    amenities = Column(JSON, default=list)                  # ["Wifi", "Inverter", "Food", ...]
-    images = Column(JSON, default=list)                     # List of image URLs
-
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-
-    # Relationships
-    owner = relationship("User", back_populates="owned_properties", foreign_keys=[owner_id])
-    rooms = relationship("Room", back_populates="property", cascade="all, delete-orphan")
+    owner = relationship("User", back_populates="properties")
+    slots = relationship("Slot", back_populates="property", cascade="all, delete-orphan")
     reviews = relationship("Review", back_populates="property", cascade="all, delete-orphan")
-    tenancies = relationship("Tenancy", back_populates="property")
+    tenants = relationship("Tenant", back_populates="property", cascade="all, delete-orphan")
 
-
-class Room(Base):
-    """A room inside a property with multiple slots."""
-    __tablename__ = "rooms"
-
-    id = Column(Integer, primary_key=True, index=True)
-    property_id = Column(Integer, ForeignKey("properties.id", ondelete="CASCADE"))
-    room_label = Column(String(50), default="Room A")       # Room A, Room B, etc.
-    capacity = Column(Integer, default=2)
-    rent_per_slot = Column(Integer, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-    property = relationship("Property", back_populates="rooms")
-    slots = relationship("Slot", back_populates="room", cascade="all, delete-orphan")
+    @property
+    def is_approved(self) -> bool:
+        return self.status == "approved"
 
 
 class Slot(Base):
-    """Individual bed slot inside a room."""
+    """One rentable bed/room inside a property."""
     __tablename__ = "slots"
 
-    id = Column(Integer, primary_key=True, index=True)
-    room_id = Column(Integer, ForeignKey("rooms.id", ondelete="CASCADE"))
-    slot_label = Column(String(20), default="Slot 1")
+    id = Column(Integer, primary_key=True)
+    property_id = Column(Integer, ForeignKey("properties.id"), nullable=False, index=True)
+    label = Column(String(50))          # "Room 101 - Bed A"
+    rent_per_slot = Column(Integer)
     is_occupied = Column(Boolean, default=False)
-    # Anonymous roommate preferences (Profile snapshot, NOT user identity)
-    roommate_prefs = Column(JSON, nullable=True)            # {"veg":"Veg", "smoker":"Non-smoker", ...}
-    about_me_snippet = Column(Text, nullable=True)          # Anonymous snippet
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    occupied_by = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime, default=utcnow)
 
-    room = relationship("Room", back_populates="slots")
-    tenancy = relationship("Tenancy", back_populates="slot", uselist=False)
+    property = relationship("Property", back_populates="slots")
 
 
-class Tenancy(Base):
-    """Links a student to a slot in a property."""
-    __tablename__ = "tenancies"
+class Tenant(Base):
+    __tablename__ = "tenants"
 
-    id = Column(Integer, primary_key=True, index=True)
-    student_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
-    property_id = Column(Integer, ForeignKey("properties.id", ondelete="CASCADE"))
-    slot_id = Column(Integer, ForeignKey("slots.id", ondelete="SET NULL"), nullable=True)
-    rent_status = Column(String(20), default="UNPAID")      # PAID / UNPAID / PARTIAL
-    issue_raised = Column(Boolean, default=False)
-    issue_description = Column(Text, nullable=True)
-    start_date = Column(DateTime(timezone=True), nullable=True)
-    end_date = Column(DateTime(timezone=True), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    id = Column(Integer, primary_key=True)
+    property_id = Column(Integer, ForeignKey("properties.id"), nullable=False, index=True)
+    slot_id = Column(Integer, ForeignKey("slots.id"))
+    student_id = Column(Integer, ForeignKey("users.id"))
+    name = Column(String(120), nullable=False)
+    phone = Column(String(20))
+    reg_no = Column(String(30))
+    rent = Column(Integer)
+    start_date = Column(DateTime, default=utcnow)
+    end_date = Column(DateTime)
+    rent_status = Column(String(20), default="due")  # paid | due | overdue
+    created_at = Column(DateTime, default=utcnow)
 
-    student = relationship("User", back_populates="tenancies")
-    property = relationship("Property", back_populates="tenancies")
-    slot = relationship("Slot", back_populates="tenancy")
+    property = relationship("Property", back_populates="tenants")
 
 
+# ---------------------------------------------------------------- reviews ---
 class Review(Base):
-    """Anonymous property reviews."""
     __tablename__ = "reviews"
 
-    id = Column(Integer, primary_key=True, index=True)
-    property_id = Column(Integer, ForeignKey("properties.id", ondelete="CASCADE"))
-    author_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    # Rating dimensions
-    noise_rating = Column(Float, nullable=True)
-    electricity_rating = Column(Float, nullable=True)
-    owner_behavior_rating = Column(Float, nullable=True)
-    overall_rating = Column(Float, nullable=False)
-    comment = Column(Text, nullable=True)
-    is_anonymous = Column(Boolean, default=True)
-    is_approved = Column(Boolean, default=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    id = Column(Integer, primary_key=True)
+    property_id = Column(Integer, ForeignKey("properties.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    stars = Column(Float, nullable=False)
+    comment = Column(Text)
+    is_anonymous = Column(Boolean, default=False)
+    is_flagged = Column(Boolean, default=False)
+    is_hidden = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=utcnow)
 
     property = relationship("Property", back_populates="reviews")
-    author = relationship("User", back_populates="reviews")
+    user = relationship("User", back_populates="reviews")
 
 
-class Service(Base):
-    """Local services like electrician, plumber, etc."""
-    __tablename__ = "services"
-
-    id = Column(Integer, primary_key=True, index=True)
-    service_type = Column(String(50), nullable=False)       # Electrician, Plumber, Maid, Cook, Tiffin
-    provider_name = Column(String(100), nullable=False)
-    phone = Column(String(20), nullable=False)
-    area = Column(String(100), nullable=True)
-    latitude = Column(Float, nullable=True)
-    longitude = Column(Float, nullable=True)
-    rating = Column(Float, default=4.0)
-    is_verified = Column(Boolean, default=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-
+# -------------------------------------------------------------- community ---
 class CommunityGroup(Base):
     __tablename__ = "community_groups"
 
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(100), nullable=False)
-    group_type = Column(String(30), default="General")      # General / BuySell / GenderBased
-    description = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    id = Column(Integer, primary_key=True)
+    name = Column(String(120), nullable=False)
+    slug = Column(String(120), unique=True)
+    description = Column(Text)
+    category = Column(String(50), default="general")  # housing | roommates | transport | events | general
+    icon = Column(String(10), default="💬")
+    created_at = Column(DateTime, default=utcnow)
 
     posts = relationship("CommunityPost", back_populates="group", cascade="all, delete-orphan")
+    members = relationship("GroupMember", back_populates="group", cascade="all, delete-orphan")
+
+
+class GroupMember(Base):
+    __tablename__ = "group_members"
+    __table_args__ = (UniqueConstraint("group_id", "user_id", name="uq_group_member"),)
+
+    id = Column(Integer, primary_key=True)
+    group_id = Column(Integer, ForeignKey("community_groups.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    joined_at = Column(DateTime, default=utcnow)
+
+    group = relationship("CommunityGroup", back_populates="members")
 
 
 class CommunityPost(Base):
     __tablename__ = "community_posts"
 
-    id = Column(Integer, primary_key=True, index=True)
-    group_id = Column(Integer, ForeignKey("community_groups.id", ondelete="CASCADE"))
-    author_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    id = Column(Integer, primary_key=True)
+    group_id = Column(Integer, ForeignKey("community_groups.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    title = Column(String(200))
     content = Column(Text, nullable=False)
+    tags = Column(JSON, default=list)
     likes = Column(Integer, default=0)
-    is_anonymous = Column(Boolean, default=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    is_flagged = Column(Boolean, default=False)
+    is_hidden = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=utcnow)
 
     group = relationship("CommunityGroup", back_populates="posts")
-    author = relationship("User", back_populates="community_posts")
+    author = relationship("User")
     comments = relationship("PostComment", back_populates="post", cascade="all, delete-orphan")
 
 
 class PostComment(Base):
     __tablename__ = "post_comments"
 
-    id = Column(Integer, primary_key=True, index=True)
-    post_id = Column(Integer, ForeignKey("community_posts.id", ondelete="CASCADE"))
-    author_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    id = Column(Integer, primary_key=True)
+    post_id = Column(Integer, ForeignKey("community_posts.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
     content = Column(Text, nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime, default=utcnow)
 
     post = relationship("CommunityPost", back_populates="comments")
+    author = relationship("User")
 
 
-class CommuteGroup(Base):
-    """Smart transport groups for students travelling together."""
-    __tablename__ = "commute_groups"
+# -------------------------------------------------------------- transport ---
+class TransportRide(Base):
+    """A shared ride (cab / auto) posted by a student."""
+    __tablename__ = "transport_rides"
 
-    id = Column(Integer, primary_key=True, index=True)
-    departure_time = Column(String(20), nullable=False)     # "09:00 AM"
-    from_area = Column(String(100), nullable=True)
-    to_area = Column(String(100), nullable=True)
-    transport_type = Column(String(30), default="Car")
-    max_members = Column(Integer, default=4)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    id = Column(Integer, primary_key=True)
+    host_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    origin = Column(String(150), nullable=False)
+    destination = Column(String(150), nullable=False)
+    depart_at = Column(DateTime, nullable=False)
+    mode = Column(String(20), default="cab")   # cab | auto | bike | bus
+    seats_total = Column(Integer, default=3)
+    seats_taken = Column(Integer, default=0)
+    cost_per_head = Column(Integer, default=0)
+    notes = Column(Text)
+    status = Column(String(20), default="open")  # open | full | completed | cancelled
+    created_at = Column(DateTime, default=utcnow)
 
-    members = relationship("CommuteGroupMember", back_populates="group", cascade="all, delete-orphan")
-
-
-class CommuteGroupMember(Base):
-    __tablename__ = "commute_group_members"
-
-    id = Column(Integer, primary_key=True, index=True)
-    group_id = Column(Integer, ForeignKey("commute_groups.id", ondelete="CASCADE"))
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
-    joined_at = Column(DateTime(timezone=True), server_default=func.now())
-
-    group = relationship("CommuteGroup", back_populates="members")
+    host = relationship("User")
+    passengers = relationship("RidePassenger", back_populates="ride", cascade="all, delete-orphan")
 
 
-class Notification(Base):
-    __tablename__ = "notifications"
+class RidePassenger(Base):
+    __tablename__ = "ride_passengers"
+    __table_args__ = (UniqueConstraint("ride_id", "user_id", name="uq_ride_passenger"),)
 
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
-    title = Column(String(200), nullable=False)
-    message = Column(Text, nullable=False)
-    is_read = Column(Boolean, default=False)
-    notif_type = Column(String(30), default="info")         # info / warning / success / alert
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    id = Column(Integer, primary_key=True)
+    ride_id = Column(Integer, ForeignKey("transport_rides.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    joined_at = Column(DateTime, default=utcnow)
 
-    user = relationship("User", back_populates="notifications")
+    ride = relationship("TransportRide", back_populates="passengers")
 
 
+# -------------------------------------------------------- analytics & misc ---
 class RentTrend(Base):
-    """Historical rent data per area for the Rent Analyzer."""
+    """Monthly average rent per area & property type (powers RentAnalyzer)."""
     __tablename__ = "rent_trends"
 
-    id = Column(Integer, primary_key=True, index=True)
-    area = Column(String(100), nullable=False)
-    month = Column(String(20), nullable=False)              # "Jan 2024"
+    id = Column(Integer, primary_key=True)
+    area = Column(String(100), index=True, nullable=False)
+    property_type = Column(String(40), nullable=False)
+    month = Column(String(7), nullable=False)   # "2026-03"
     avg_rent = Column(Integer, nullable=False)
-    property_type = Column(String(10), default="PG")
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    listings = Column(Integer, default=0)
+
+
+class Service(Base):
+    """Local services near campus: laundry, mess, tiffin, doctor, electrician ..."""
+    __tablename__ = "services"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(150), nullable=False)
+    category = Column(String(50), index=True, nullable=False)
+    description = Column(Text)
+    phone = Column(String(20))
+    area = Column(String(100))
+    address = Column(String(300))
+    lat = Column(Float)
+    lng = Column(Float)
+    rating = Column(Float, default=4.0)
+    price_range = Column(String(50))
+    is_verified = Column(Boolean, default=True)
+    open_hours = Column(String(100))
+
+
+class Payment(Base):
+    __tablename__ = "payments"
+
+    id = Column(Integer, primary_key=True)
+    slot_id = Column(Integer, ForeignKey("slots.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    razorpay_order_id = Column(String(100), nullable=False)
+    razorpay_payment_id = Column(String(100))
+    amount = Column(Integer, nullable=False)   # INR
+    status = Column(String(20), default="created")  # created | paid | failed
+    created_at = Column(DateTime, default=utcnow)

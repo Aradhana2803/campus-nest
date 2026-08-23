@@ -1,37 +1,25 @@
-from sqlalchemy import create_engine, event
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
-from config import settings
+from sqlalchemy import create_engine
+from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
-# Choose DB URL
-DATABASE_URL = settings.SQLITE_URL if settings.USE_SQLITE else settings.DATABASE_URL
+from .config import settings
 
-# Engine kwargs
-connect_args = {}
-if "sqlite" in DATABASE_URL:
-    connect_args = {"check_same_thread": False}
+_connect_args = {"check_same_thread": False} if settings.USE_SQLITE else {}
 
 engine = create_engine(
-    DATABASE_URL,
-    connect_args=connect_args,
-    echo=settings.DEBUG,
+    settings.sqlalchemy_url,
+    connect_args=_connect_args,
+    pool_pre_ping=True,
+    echo=False,
 )
-
-# Enable SQLite foreign keys
-if "sqlite" in DATABASE_URL:
-    @event.listens_for(engine, "connect")
-    def set_sqlite_pragma(dbapi_connection, connection_record):
-        cursor = dbapi_connection.cursor()
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
-
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-Base = declarative_base()
+
+class Base(DeclarativeBase):
+    pass
 
 
 def get_db():
-    """Dependency to get DB session."""
+    """FastAPI dependency — one DB session per request."""
     db = SessionLocal()
     try:
         yield db

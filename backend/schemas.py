@@ -1,388 +1,423 @@
-from pydantic import BaseModel, validator, Field
-from typing import List, Optional, Any, Dict
+"""Pydantic request / response schemas."""
 from datetime import datetime
+from typing import Any, List, Optional
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
-# ─────────────── OTP / Auth ───────────────
+class ORM(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
 
+
+# ------------------------------------------------------------------- auth ---
 class SendOTPRequest(BaseModel):
+    identifier: str = Field(..., description="Phone number (owner/moderator) or registration no (student)")
+    role: str = Field("student", pattern="^(student|owner|moderator)$")
+
+
+class SendOTPResponse(BaseModel):
+    message: str
+    identifier: str
+    expires_in_minutes: int
+    demo_otp: Optional[str] = None  # only returned when DEBUG=true
+
+
+class StudentLoginRequest(BaseModel):
+    reg_no: str
+    otp: str
+    name: Optional[str] = None
+
+
+class PhoneLoginRequest(BaseModel):
     phone: str
-
-    @validator("phone")
-    def validate_phone(cls, v):
-        v = v.strip().replace(" ", "").replace("-", "")
-        if not v.startswith("+"):
-            v = "+91" + v.lstrip("0")
-        return v
+    otp: str
+    name: Optional[str] = None
 
 
-class VerifyOTPRequest(BaseModel):
-    phone: str
-    otp_code: str
+class UserOut(ORM):
+    id: int
+    role: str
+    name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    reg_no: Optional[str] = None
+    college: Optional[str] = None
+    avatar_url: Optional[str] = None
+    is_verified: bool = False
+    veg: Optional[str] = None
+    smoker: Optional[str] = None
+    sleep: Optional[str] = None
+    cleanliness: Optional[str] = None
+    study: Optional[str] = None
+    budget: Optional[int] = None
+    about_me: Optional[str] = None
+    looking_for_roommate: Optional[bool] = True
+    created_at: Optional[datetime] = None
 
 
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
-    role: str
-    user_id: int
-    profile_complete: bool
+    user: UserOut
 
 
-# ─────────────── Student Registration ───────────────
-
-class StudentRegisterRequest(BaseModel):
-    phone: str
-    reg_no: str
-    otp_code: str
+class ProfileUpdate(BaseModel):
     name: Optional[str] = None
-    gender: Optional[str] = "Other"
-    parent_phone: Optional[str] = None
-    face_id_url: Optional[str] = None
-
-    @validator("reg_no")
-    def validate_reg_no(cls, v):
-        import re
-        pattern = r"^\d{2}[a-zA-Z]{3}\d{5}$"
-        if not re.match(pattern, v):
-            raise ValueError("Registration number must be in format: 11abc11111")
-        return v.upper()
-
-
-class StudentLoginRequest(BaseModel):
-    identifier: str      # Phone or reg_no
-    otp_code: str
-
-
-# ─────────────── Owner Registration ───────────────
-
-class OwnerRegisterRequest(BaseModel):
-    name: str
-    phone: str
-    otp_code: str
-    photo_url: Optional[str] = None
-
-
-class OwnerLoginRequest(BaseModel):
-    phone: str
-    otp_code: str
-
-
-# ─────────────── Profile ───────────────
-
-class ProfileCreate(BaseModel):
-    veg: str = "Veg"
-    smoker: str = "Non-smoker"
-    sleep: str = "Flexible"
-    cleanliness: str = "Neat Freak"
-    study: str = "Library Dweller"
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    college: Optional[str] = None
+    avatar_url: Optional[str] = None
+    veg: Optional[str] = None
+    smoker: Optional[str] = None
+    sleep: Optional[str] = None
+    cleanliness: Optional[str] = None
+    study: Optional[str] = None
+    budget: Optional[int] = None
     about_me: Optional[str] = None
+    looking_for_roommate: Optional[bool] = None
 
 
-class ProfileResponse(BaseModel):
+# ------------------------------------------------------------- properties ---
+class OwnerBrief(ORM):
     id: int
-    veg: str
-    smoker: str
-    sleep: str
-    cleanliness: str
-    study: str
-    about_me: Optional[str]
-
-    class Config:
-        from_attributes = True
+    name: Optional[str] = None
+    phone: Optional[str] = None
+    is_verified: bool = False
 
 
-# ─────────────── User ───────────────
-
-class UserResponse(BaseModel):
+class SlotOut(ORM):
     id: int
-    name: Optional[str]
-    phone: str
-    reg_no: Optional[str]
-    role: str
-    gender: Optional[str]
-    is_verified: bool
-    profile_complete: bool
-    profile: Optional[ProfileResponse]
-    created_at: Optional[datetime]
-
-    class Config:
-        from_attributes = True
-
-
-# ─────────────── Property ───────────────
-
-class SlotCreate(BaseModel):
-    slot_label: str = "Slot 1"
-
-
-class SlotResponse(BaseModel):
-    id: int
-    slot_label: str
-    is_occupied: bool
-    roommate_prefs: Optional[Dict[str, Any]]
-    about_me_snippet: Optional[str]
-
-    class Config:
-        from_attributes = True
-
-
-class RoomCreate(BaseModel):
-    room_label: str = "Room A"
-    capacity: int = 2
+    property_id: int
+    label: Optional[str] = None
     rent_per_slot: Optional[int] = None
-    slots: List[SlotCreate] = []
+    is_occupied: bool = False
 
 
-class RoomResponse(BaseModel):
-    id: int
-    room_label: str
-    capacity: int
-    rent_per_slot: Optional[int]
-    slots: List[SlotResponse]
-
-    class Config:
-        from_attributes = True
-
-
-class PropertyCreate(BaseModel):
+class PropertyBase(BaseModel):
     name: str
+    type: str = "PG"
+    gender: str = "any"
     description: Optional[str] = None
-    property_type: str = "PG"       # PG / Flat
-    gender_type: str = "Co-ed"      # Boys / Girls / Co-ed / Any
+    address: Optional[str] = None
     area: Optional[str] = None
-    full_address: Optional[str] = None
-    latitude: Optional[float] = None
-    longitude: Optional[float] = None
+    city: Optional[str] = "Bhopal"
+    lat: Optional[float] = None
+    lng: Optional[float] = None
     rent: int
-    other_price: Optional[int] = None
-    security_deposit: Optional[int] = None
-    distance: Optional[str] = None
+    deposit: int = 0
+    other_price: int = 0
+    distance_km: float = 0
     amenities: List[str] = []
     images: List[str] = []
-    rooms: List[RoomCreate] = []
+    total_slots: int = 1
 
 
-class PropertyResponse(BaseModel):
+class PropertyCreate(PropertyBase):
+    pass
+
+
+class PropertyUpdate(BaseModel):
+    name: Optional[str] = None
+    type: Optional[str] = None
+    gender: Optional[str] = None
+    description: Optional[str] = None
+    address: Optional[str] = None
+    area: Optional[str] = None
+    city: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    rent: Optional[int] = None
+    deposit: Optional[int] = None
+    other_price: Optional[int] = None
+    distance_km: Optional[float] = None
+    amenities: Optional[List[str]] = None
+    images: Optional[List[str]] = None
+    total_slots: Optional[int] = None
+
+
+class PropertyOut(ORM):
     id: int
+    owner_id: int
     name: str
-    description: Optional[str]
-    property_type: str
-    gender_type: str
-    area: Optional[str]
-    full_address: Optional[str]
-    latitude: Optional[float]
-    longitude: Optional[float]
+    type: Optional[str] = None
+    gender: Optional[str] = None
+    description: Optional[str] = None
+    address: Optional[str] = None
+    area: Optional[str] = None
+    city: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
     rent: int
-    other_price: Optional[int]
-    security_deposit: Optional[int]
-    safety_score: float
-    distance: Optional[str]
-    approval_status: str
-    verified_badge: bool
-    amenities: List[str]
-    images: List[str]
-    rooms: List[RoomResponse]
-    avg_rating: Optional[float] = None
-    review_count: Optional[int] = 0
-    available_slots: Optional[int] = 0
-
-    class Config:
-        from_attributes = True
-
-
-class PropertyListItem(BaseModel):
-    """Lightweight listing for search results."""
-    id: int
-    name: str
-    property_type: str
-    gender_type: str
-    area: Optional[str]
-    rent: int
-    other_price: Optional[int]
-    safety_score: float
-    distance: Optional[str]
-    verified_badge: bool
-    amenities: List[str]
-    images: List[str]
-    avg_rating: Optional[float]
-    review_count: int
-    available_slots: int
-    approval_status: str
-
-    class Config:
-        from_attributes = True
+    deposit: Optional[int] = 0
+    other_price: Optional[int] = 0
+    distance_km: Optional[float] = 0
+    safety_score: Optional[float] = None
+    amenities: List[str] = []
+    images: List[str] = []
+    total_slots: int = 1
+    status: str
+    is_approved: bool = False
+    rejection_reason: Optional[str] = None
+    is_featured: bool = False
+    created_at: Optional[datetime] = None
+    # computed
+    avg_rating: float = 0
+    review_count: int = 0
+    available_slots: int = 0
+    owner: Optional[OwnerBrief] = None
 
 
-# ─────────────── Review ───────────────
+class PropertyDetail(PropertyOut):
+    slots: List[SlotOut] = []
+    reviews: List["ReviewOut"] = []
 
+
+class PropertyList(BaseModel):
+    total: int
+    items: List[PropertyOut]
+
+
+class CompareRequest(BaseModel):
+    property_ids: List[int] = Field(..., min_length=2, max_length=4)
+
+
+class CompareResponse(BaseModel):
+    properties: List[PropertyOut]
+    best_value_id: Optional[int] = None
+    cheapest_id: Optional[int] = None
+    closest_id: Optional[int] = None
+    safest_id: Optional[int] = None
+    top_rated_id: Optional[int] = None
+    summary: dict
+
+
+class ModerationAction(BaseModel):
+    status: str = Field(..., pattern="^(approved|rejected|pending)$")
+    reason: Optional[str] = None
+
+
+# ---------------------------------------------------------------- reviews ---
 class ReviewCreate(BaseModel):
     property_id: int
-    noise_rating: Optional[float] = Field(None, ge=1, le=5)
-    electricity_rating: Optional[float] = Field(None, ge=1, le=5)
-    owner_behavior_rating: Optional[float] = Field(None, ge=1, le=5)
-    overall_rating: float = Field(..., ge=1, le=5)
+    stars: float = Field(..., ge=0, le=5)
     comment: Optional[str] = None
-    is_anonymous: bool = True
+    is_anonymous: bool = False
 
 
-class ReviewResponse(BaseModel):
+class ReviewOut(ORM):
     id: int
-    noise_rating: Optional[float]
-    electricity_rating: Optional[float]
-    owner_behavior_rating: Optional[float]
-    overall_rating: float
-    comment: Optional[str]
-    is_anonymous: bool
-    created_at: Optional[datetime]
+    property_id: int
+    user_id: Optional[int] = None
+    author_name: Optional[str] = None
+    stars: float
+    comment: Optional[str] = None
+    is_anonymous: bool = False
+    is_flagged: bool = False
+    is_hidden: bool = False
+    created_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+
+class ReviewModeration(BaseModel):
+    is_hidden: Optional[bool] = None
+    is_flagged: Optional[bool] = None
 
 
-# ─────────────── Tenancy ───────────────
+PropertyDetail.model_rebuild()
 
-class TenancyCreate(BaseModel):
+
+# ---------------------------------------------------------------- tenants ---
+class TenantCreate(BaseModel):
     property_id: int
     slot_id: Optional[int] = None
+    name: str
+    phone: Optional[str] = None
+    reg_no: Optional[str] = None
+    rent: Optional[int] = None
+    start_date: Optional[datetime] = None
 
 
-class TenancyResponse(BaseModel):
+class TenantUpdate(BaseModel):
+    rent_status: Optional[str] = Field(None, pattern="^(paid|due|overdue)$")
+    end_date: Optional[datetime] = None
+    rent: Optional[int] = None
+
+
+class TenantOut(ORM):
     id: int
     property_id: int
-    rent_status: str
-    issue_raised: bool
-    issue_description: Optional[str]
-
-    class Config:
-        from_attributes = True
-
-
-class TenancyUpdate(BaseModel):
-    rent_status: Optional[str] = None
-    issue_raised: Optional[bool] = None
-    issue_description: Optional[str] = None
+    slot_id: Optional[int] = None
+    student_id: Optional[int] = None
+    name: str
+    phone: Optional[str] = None
+    reg_no: Optional[str] = None
+    rent: Optional[int] = None
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+    rent_status: str = "due"
 
 
-# ─────────────── Services ───────────────
-
-class ServiceResponse(BaseModel):
+# -------------------------------------------------------------- community ---
+class GroupOut(ORM):
     id: int
-    service_type: str
-    provider_name: str
-    phone: str
-    area: Optional[str]
-    latitude: Optional[float]
-    longitude: Optional[float]
-    rating: float
-    is_verified: bool
-
-    class Config:
-        from_attributes = True
+    name: str
+    slug: Optional[str] = None
+    description: Optional[str] = None
+    category: str
+    icon: Optional[str] = None
+    member_count: int = 0
+    post_count: int = 0
+    is_member: bool = False
 
 
-# ─────────────── Community ───────────────
+class AuthorBrief(ORM):
+    id: int
+    name: Optional[str] = None
+    role: str
+    avatar_url: Optional[str] = None
+
+
+class CommentOut(ORM):
+    id: int
+    post_id: int
+    content: str
+    author: Optional[AuthorBrief] = None
+    created_at: Optional[datetime] = None
+
 
 class PostCreate(BaseModel):
     group_id: int
+    title: Optional[str] = None
     content: str
-    is_anonymous: bool = False
+    tags: List[str] = []
 
 
 class CommentCreate(BaseModel):
     content: str
 
 
-class PostResponse(BaseModel):
+class PostOut(ORM):
     id: int
     group_id: int
+    title: Optional[str] = None
     content: str
-    likes: int
-    is_anonymous: bool
-    created_at: Optional[datetime]
-    author_name: Optional[str] = None
+    tags: List[str] = []
+    likes: int = 0
+    is_flagged: bool = False
+    author: Optional[AuthorBrief] = None
     comment_count: int = 0
-
-    class Config:
-        from_attributes = True
+    created_at: Optional[datetime] = None
 
 
-class GroupResponse(BaseModel):
+class PostDetail(PostOut):
+    comments: List[CommentOut] = []
+
+
+# -------------------------------------------------------------- roommates ---
+class RoommateMatch(BaseModel):
+    user: UserOut
+    score: int          # 0-100 compatibility
+    matched_on: List[str]
+    differs_on: List[str]
+
+
+# -------------------------------------------------------------- transport ---
+class RideCreate(BaseModel):
+    origin: str
+    destination: str
+    depart_at: datetime
+    mode: str = "cab"
+    seats_total: int = Field(3, ge=1, le=8)
+    cost_per_head: int = 0
+    notes: Optional[str] = None
+
+
+class RideOut(ORM):
     id: int
-    name: str
-    group_type: str
-    description: Optional[str]
-
-    class Config:
-        from_attributes = True
-
-
-# ─────────────── Commute ───────────────
-
-class CommuteGroupCreate(BaseModel):
-    departure_time: str
-    from_area: str
-    to_area: str = "VIT Campus"
-    transport_type: str = "Car"
-    max_members: int = 4
+    host: Optional[AuthorBrief] = None
+    origin: str
+    destination: str
+    depart_at: datetime
+    mode: str
+    seats_total: int
+    seats_taken: int
+    seats_left: int = 0
+    cost_per_head: int = 0
+    notes: Optional[str] = None
+    status: str
+    is_joined: bool = False
+    created_at: Optional[datetime] = None
 
 
-class CommuteGroupResponse(BaseModel):
-    id: int
-    departure_time: str
-    from_area: Optional[str]
-    to_area: Optional[str]
-    transport_type: str
-    max_members: int
-    member_count: int = 0
-
-    class Config:
-        from_attributes = True
-
-
-# ─────────────── Rent Trends ───────────────
-
-class RentTrendResponse(BaseModel):
-    area: str
+# -------------------------------------------------------------- analytics ---
+class RentTrendPoint(BaseModel):
     month: str
     avg_rent: int
+    listings: int = 0
+
+
+class RentTrendSeries(BaseModel):
+    area: str
     property_type: str
+    points: List[RentTrendPoint]
+    change_pct: float = 0
 
-    class Config:
-        from_attributes = True
+
+class RentAnalysis(BaseModel):
+    rent: int
+    area: Optional[str] = None
+    property_type: Optional[str] = None
+    market_avg: Optional[int] = None
+    verdict: str
+    diff_pct: Optional[float] = None
+    percentile: Optional[int] = None
+    suggestion: str
 
 
-# ─────────────── Notifications ───────────────
+class AreaSummary(BaseModel):
+    area: str
+    avg_rent: int
+    min_rent: int
+    max_rent: int
+    listings: int
+    avg_safety: float
 
-class NotificationResponse(BaseModel):
+
+# --------------------------------------------------------------- services ---
+class ServiceOut(ORM):
     id: int
-    title: str
+    name: str
+    category: str
+    description: Optional[str] = None
+    phone: Optional[str] = None
+    area: Optional[str] = None
+    address: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    rating: Optional[float] = None
+    price_range: Optional[str] = None
+    is_verified: bool = True
+    open_hours: Optional[str] = None
+
+
+# --------------------------------------------------------------- payments ---
+class CreateOrderRequest(BaseModel):
+    slot_id: int
+
+
+class CreateOrderResponse(BaseModel):
+    order_id: str
+    amount: int  # in paise
+    currency: str
+    key_id: str
+
+
+class VerifyPaymentRequest(BaseModel):
+    razorpay_order_id: str
+    razorpay_payment_id: str
+    razorpay_signature: str
+
+
+# ---------------------------------------------------------------- generic ---
+class Message(BaseModel):
     message: str
-    is_read: bool
-    notif_type: str
-    created_at: Optional[datetime]
-
-    class Config:
-        from_attributes = True
-
-
-# ─────────────── Moderation ───────────────
-
-class ModerationAction(BaseModel):
-    action: str         # APPROVE / REJECT
-    reason: Optional[str] = None
-
-
-# ─────────────── Generic ───────────────
-
-class MessageResponse(BaseModel):
-    message: str
-    success: bool = True
-
-
-class PaginatedResponse(BaseModel):
-    items: List[Any]
-    total: int
-    page: int
-    per_page: int
-    pages: int
+    data: Optional[Any] = None
